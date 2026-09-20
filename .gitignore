@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local datasets
+dataset/
+data/
+
+# Model weights
+*.pth
+*.pt
+*.onnx
+
+# Large generated files
+*.csv
+*.log
+exp_result/visualization/
+
+# Editors
+.idea/
+.vscode/
+
+# Operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini
