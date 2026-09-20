@@ -30,3 +30,6 @@ exp_result/visualization/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Temporary smoke-test runs
+exp_result/smoke_*/
