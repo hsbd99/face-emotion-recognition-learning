@@ -1,51 +1,85 @@
-import os
+"""Compare the CNN and HOG + SVM baselines from saved metrics."""
+from __future__ import annotations
 
-def read_metric(file_path):
-    # 读取文件，过滤空行，只保留带冒号的有效行
-    valid_lines = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        raw_lines = f.readlines()
-        for line in raw_lines:
-            line_strip = line.strip()
-            if line_strip and ":" in line_strip:
-                valid_lines.append(line_strip)
-    # 取前两行指标
-    acc_str = valid_lines[0].split(":")[1].strip().replace("%", "")
-    f1_str = valid_lines[1].split(":")[1].strip()
-    acc = float(acc_str) / 100
-    f1 = float(f1_str)
-    return acc, f1
+import argparse
+import json
+from pathlib import Path
 
-def main():
-    print("="*50)
-    print("方法对比")
-    print("="*50)
+from config import OUTPUT_DIR
 
-    hog_file = r"D:\emotion_exp\exp_result\hog_svm_results.txt"
-    if os.path.exists(hog_file):
-        hog_acc, hog_f1 = read_metric(hog_file)
-    else:
-        print("请先运行 HOGSVM.py 生成 hog_svm_results.txt")
-        return
 
-    deep_file = r"D:\emotion_exp\exp_result\deep_results.txt"
-    if os.path.exists(deep_file):
-        try:
-            deep_acc, deep_f1 = read_metric(deep_file)
-        except Exception as e:
-            print(f"读取deep_results.txt失败：{e}")
-            deep_acc = float(input("手动输入深度学习准确率(不含%): ")) / 100
-            deep_f1 = float(input("手动输入深度学习F1-score: "))
-    else:
-        deep_acc = float(input("深度学习准确率(%): ")) / 100
-        deep_f1 = float(input("深度学习F1-score: "))
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    return parser.parse_args()
 
-    print(f"\n{'方法':<15s} {'准确率':<10s} {'F1-score':<10s}")
-    print("-"*35)
-    print(f"{'HOG+SVM':<15s} {hog_acc*100:<9.2f}% {hog_f1:<10.4f}")
-    print(f"{'深度学习':<15s} {deep_acc*100:<9.2f}% {deep_f1:<10.4f}")
-    print("-"*35)
-    print(f"{'指标提升':<15s} {(deep_acc-hog_acc)*100:<9.2f}% {(deep_f1-hog_f1):<10.4f}")
+
+def read_json(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def read_legacy_text(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    values = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip().lower()
+            value = value.strip().replace("%", "")
+            if key == "accuracy":
+                values["accuracy"] = float(value) / 100.0
+            elif key == "f1-score":
+                values["f1_weighted"] = float(value)
+    return values or None
+
+
+def main() -> None:
+    args = parse_args()
+    cnn_metrics = read_json(args.output_dir / "metrics.json")
+    hog_metrics = read_json(args.output_dir / "hog_svm_results.json")
+    if cnn_metrics is None:
+        cnn_metrics = read_legacy_text(args.output_dir / "deep_results.txt")
+    if hog_metrics is None:
+        hog_metrics = read_legacy_text(args.output_dir / "hog_svm_results.txt")
+
+    if cnn_metrics is None or hog_metrics is None:
+        raise FileNotFoundError(
+            "Required metric files are missing. Run judge.py and HOGSVM.py first."
+        )
+
+    cnn_fer = cnn_metrics.get("fer2013", cnn_metrics)
+    cnn_accuracy = float(cnn_fer["accuracy"])
+    cnn_f1 = float(cnn_fer.get("f1_weighted", cnn_fer.get("f1-score", 0.0)))
+    hog_accuracy = float(hog_metrics["accuracy"])
+    hog_f1 = float(hog_metrics.get("f1_weighted", hog_metrics.get("f1-score", 0.0)))
+
+    print("=" * 48)
+    print("Method comparison")
+    print("=" * 48)
+    print(f"{'Method':<16} {'Accuracy':>10} {'Weighted F1':>14}")
+    print("-" * 48)
+    print(f"{'HOG + SVM':<16} {hog_accuracy * 100:>9.2f}% {hog_f1:>14.4f}")
+    print(f"{'CNN':<16} {cnn_accuracy * 100:>9.2f}% {cnn_f1:>14.4f}")
+    print("-" * 48)
+    print(f"{'Improvement':<16} {(cnn_accuracy - hog_accuracy) * 100:>+9.2f}% {cnn_f1 - hog_f1:>+14.4f}")
+
+    output = {
+        "hog_svm": {"accuracy": hog_accuracy, "f1_weighted": hog_f1},
+        "cnn": {"accuracy": cnn_accuracy, "f1_weighted": cnn_f1},
+        "improvement": {
+            "accuracy": cnn_accuracy - hog_accuracy,
+            "f1_weighted": cnn_f1 - hog_f1,
+        },
+    }
+    with open(args.output_dir / "comparison.json", "w", encoding="utf-8") as handle:
+        json.dump(output, handle, indent=2, ensure_ascii=False)
+
 
 if __name__ == "__main__":
     main()

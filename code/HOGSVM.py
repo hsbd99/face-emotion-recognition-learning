@@ -1,48 +1,94 @@
-import os
+"""Train the HOG + SVM baseline with reproducible metrics output."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
 import cv2
+import joblib
 import numpy as np
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, f1_score
+from tqdm import tqdm
 
-EMOTION_MAP = {"angry":0, "disgust":1, "fear":2, "happy":3, "sad":4, "surprise":5, "neutral":6}
+from config import EMOTIONS, EMOTION_TO_INDEX, OUTPUT_DIR
+from data import resolve_fer_root
 
-def load_data(root, split="train"):
-    features, labels = [], []
-    for emo, label in EMOTION_MAP.items():
-        emo_dir = os.path.join(root, split, emo)
-        if os.path.exists(emo_dir):
-            for img_name in os.listdir(emo_dir):
-                img = cv2.imread(os.path.join(emo_dir, img_name))
-                if img is None:
-                    continue
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                hog = cv2.HOGDescriptor((48,48), (16,16), (8,8), (8,8), 9)
-                features.append(hog.compute(gray).flatten())
-                labels.append(label)
-    return np.array(features), np.array(labels)
 
-def main():
-    print("HOG+SVM训练中...")
-    root = r"D:\emotion_exp\dataset\FER2013_aligned"
-    X_train, y_train = load_data(root, "train")
-    X_test, y_test = load_data(root, "test")
-    print(f"训练集: {len(X_train)}, 测试集: {len(X_test)}")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=None)
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--c", type=float, default=10.0)
+    return parser.parse_args()
 
-    svm = SVC(kernel='rbf', C=10, gamma='scale', class_weight='balanced')
-    svm.fit(X_train, y_train)
 
-    y_pred = svm.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average='weighted')
+def extract_hog(image: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    descriptor = cv2.HOGDescriptor((48, 48), (16, 16), (8, 8), (8, 8), 9)
+    return descriptor.compute(gray).flatten()
 
-    print(f"\nHOG+SVM结果:")
-    print(f"准确率: {acc*100:.2f}%")
-    print(f"F1-score: {f1:.4f}")
 
-    with open(r"D:\emotion_exp\exp_result\hog_svm_results.txt", "w") as f:
-        f.write(f"Accuracy: {acc*100:.2f}%\n")
-        f.write(f"F1-score: {f1:.4f}\n")
-    print("结果已保存")
+def load_split(root: Path, split: str) -> tuple[np.ndarray, np.ndarray]:
+    features: list[np.ndarray] = []
+    labels: list[int] = []
+    for emotion in EMOTIONS:
+        class_dir = root / split / emotion
+        if not class_dir.is_dir():
+            continue
+        for path in tqdm(sorted(class_dir.iterdir()), desc=f"{split}/{emotion}", leave=False):
+            if path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                continue
+            image = cv2.imread(str(path))
+            if image is None:
+                continue
+            features.append(extract_hog(image))
+            labels.append(EMOTION_TO_INDEX[emotion])
+    if not features:
+        raise RuntimeError(f"No usable images found for split '{split}' under {root}")
+    return np.stack(features), np.asarray(labels)
+
+
+def main() -> None:
+    args = parse_args()
+    root = resolve_fer_root(args.data_dir)
+    print("Extracting HOG features...")
+    train_features, train_labels = load_split(root, "train")
+    test_features, test_labels = load_split(root, "test")
+    print(f"Train: {len(train_features)} | Test: {len(test_features)}")
+
+    classifier = SVC(kernel="rbf", C=args.c, gamma="scale", class_weight="balanced")
+    classifier.fit(train_features, train_labels)
+    predictions = classifier.predict(test_features)
+    metrics = {
+        "samples": int(len(test_labels)),
+        "accuracy": float(accuracy_score(test_labels, predictions)),
+        "f1_weighted": float(f1_score(test_labels, predictions, average="weighted", zero_division=0)),
+        "f1_macro": float(f1_score(test_labels, predictions, average="macro", zero_division=0)),
+        "classification_report": classification_report(
+            test_labels,
+            predictions,
+            labels=list(range(len(EMOTIONS))),
+            target_names=EMOTIONS,
+            output_dict=True,
+            zero_division=0,
+        ),
+    }
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    model_path = args.output_dir / "hog_svm.joblib"
+    joblib.dump({"model": classifier, "class_names": EMOTIONS, "image_size": 48}, model_path)
+    with open(args.output_dir / "hog_svm_results.json", "w", encoding="utf-8") as handle:
+        json.dump(metrics, handle, indent=2, ensure_ascii=False)
+    with open(args.output_dir / "hog_svm_results.txt", "w", encoding="utf-8") as handle:
+        handle.write(f"Accuracy: {metrics['accuracy'] * 100:.2f}%\n")
+        handle.write(f"F1-score: {metrics['f1_weighted']:.4f}\n")
+
+    print(f"Accuracy: {metrics['accuracy'] * 100:.2f}%")
+    print(f"Weighted F1: {metrics['f1_weighted']:.4f}")
+    print(f"Saved model and metrics under {args.output_dir}")
+
 
 if __name__ == "__main__":
     main()

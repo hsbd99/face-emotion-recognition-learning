@@ -1,138 +1,180 @@
-import os
-import torch
-from torch.utils.data import DataLoader, Dataset
-import cv2
+"""Evaluate a trained checkpoint on FER2013 and optionally CK+."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+import torch
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-from model import EmotionNet
-from train import FerDataset
+from config import CKPLUS_DIR, EMOTIONS, OUTPUT_DIR
+from data import CKPlusDataset, FERDataset, get_transforms, resolve_fer_root
+from model import load_checkpoint
 
-# 重写适配单层文件夹的CKPlusDataset
-class CKPlusDataset(Dataset):
-    def __init__(self, root):
-        self.root = root
-        # CK+文件夹名称映射到7分类标签
-        self.folder_label_map = {
-            "anger": 0,
-            "contempt": 1,
-            "disgust": 1,
-            "fear": 2,
-            "happy": 3,
-            "sadness": 4,
-            "surprise": 5,
-            "neutral": 6
-        }
-        self.data = self._load()
 
-    def _load(self):
-        data = []
-        # 遍历每个表情文件夹
-        for folder_name, label in self.folder_label_map.items():
-            folder_path = os.path.join(self.root, folder_name)
-            if not os.path.isdir(folder_path):
-                continue
-            # 遍历文件夹内所有图片
-            img_names = sorted(os.listdir(folder_path))
-            for img_name in img_names:
-                img_full_path = os.path.join(folder_path, img_name)
-                data.append((img_full_path, label))
-        return data
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--data-dir", type=Path, default=None, help="FER2013 aligned/raw root")
+    parser.add_argument("--ckplus-dir", type=Path, default=CKPLUS_DIR)
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--dataset", choices=["fer", "ck+", "both"], default="both")
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--device", default="auto")
+    return parser.parse_args()
 
-    def __len__(self):
-        return len(self.data)
 
-    def __getitem__(self, idx):
-        img_path, label = self.data[idx]
-        img = cv2.imread(img_path)
-        # 图片损坏容错
-        if img is None:
-            return self.__getitem__(np.random.randint(0, len(self.data)))
-        # 统一转RGB
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-        else:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (48, 48))
-        # 转为模型输入张量
-        img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
-        return img_tensor, torch.tensor(label)
+def resolve_device(value: str) -> torch.device:
+    if value == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(value)
 
-def evaluate(model, loader, name):
-    print(f"\n{'='*50}")
-    print(f"【{name}】")
-    print(f"{'='*50}")
+
+def evaluate_dataset(model, dataset, device: torch.device, batch_size: int, workers: int) -> dict:
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=workers)
+    predictions: list[int] = []
+    labels: list[int] = []
+    probabilities: list[np.ndarray] = []
+
     model.eval()
-    preds, labels = [], []
     with torch.no_grad():
-        for imgs, lbls in loader:
-            out, _ = model(imgs)
-            preds.extend(torch.argmax(out, dim=1).numpy())
-            labels.extend(lbls.numpy())
-    acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, average='weighted')
-    print(f"准确率: {acc*100:.2f}%")
-    print(f"F1-score: {f1:.4f}")
-    cm = confusion_matrix(labels, preds)
-    print("\n混淆矩阵:")
-    names = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-    print(f"{'':>8s}", end="")
-    for n in names:
-        print(f"{n:>8s}", end="")
-    print()
-    for i, row in enumerate(cm):
-        print(f"{names[i]:>8s}", end="")
-        for val in row:
-            print(f"{val:>8d}", end="")
-        print()
-    return acc, f1
+        for images, batch_labels in tqdm(loader, desc="evaluate", leave=False):
+            logits = model(images.to(device))
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
+            predictions.extend(logits.argmax(dim=1).cpu().numpy().tolist())
+            labels.extend(batch_labels.numpy().tolist())
+            probabilities.append(probs)
 
-def main():
-    model = EmotionNet(num_classes=7)
-    model_path = r"D:\emotion_exp\code\emotion_best.pth"
-    if not os.path.exists(model_path):
-        print(f"模型文件不存在: {model_path}")
-        return
-    # 移除weights_only，兼容低版本PyTorch
-    model.load_state_dict(torch.load(model_path, map_location='cpu'))
-    print(f"模型加载成功")
+    metrics = {
+        "samples": len(labels),
+        "accuracy": float(accuracy_score(labels, predictions)),
+        "f1_weighted": float(f1_score(labels, predictions, average="weighted", zero_division=0)),
+        "f1_macro": float(f1_score(labels, predictions, average="macro", zero_division=0)),
+        "precision_macro": float(precision_score(labels, predictions, average="macro", zero_division=0)),
+        "recall_macro": float(recall_score(labels, predictions, average="macro", zero_division=0)),
+        "classification_report": classification_report(
+            labels,
+            predictions,
+            labels=list(range(len(EMOTIONS))),
+            target_names=EMOTIONS,
+            output_dict=True,
+            zero_division=0,
+        ),
+        "confusion_matrix": confusion_matrix(labels, predictions, labels=list(range(len(EMOTIONS)))).tolist(),
+        "_predictions": predictions,
+        "_labels": labels,
+        "_probabilities": np.concatenate(probabilities, axis=0) if probabilities else np.empty((0, len(EMOTIONS))),
+    }
+    return metrics
 
-    # FER2013测试集评估
-    fer_root = r"D:\emotion_exp\dataset\FER2013_aligned"
-    fer_test = FerDataset(fer_root, split="test")
-    fer_loader = DataLoader(fer_test, batch_size=16)
-    print(f"FER-2013测试集样本总数: {len(fer_test)}")
-    fer_acc, fer_f1 = evaluate(model, fer_loader, "FER-2013")
 
-    # CK+数据集评估（现在路径匹配你的文件夹）
-    ck_root = r"D:\emotion_exp\dataset\CK+"
-    ck_acc, ck_f1 = 0, 0
-    if os.path.exists(ck_root):
-        ck_data = CKPlusDataset(ck_root)
-        ck_loader = DataLoader(ck_data, batch_size=16)
-        print(f"CK+数据集样本总数: {len(ck_data)}")
-        ck_acc, ck_f1 = evaluate(model, ck_loader, "CK+")
-    else:
-        print("未检测到CK+数据集文件夹")
+def save_confusion_matrix(matrix: list[list[int]], path: Path, title: str) -> None:
+    values = np.asarray(matrix)
+    fig, ax = plt.subplots(figsize=(9, 7))
+    image = ax.imshow(values, interpolation="nearest", cmap="Blues")
+    fig.colorbar(image, ax=ax)
+    ax.set(
+        xticks=np.arange(len(EMOTIONS)),
+        yticks=np.arange(len(EMOTIONS)),
+        xticklabels=EMOTIONS,
+        yticklabels=EMOTIONS,
+        ylabel="True label",
+        xlabel="Predicted label",
+        title=title,
+    )
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    threshold = values.max() / 2.0 if values.size else 0
+    for row in range(values.shape[0]):
+        for column in range(values.shape[1]):
+            ax.text(
+                column,
+                row,
+                str(values[row, column]),
+                ha="center",
+                va="center",
+                color="white" if values[row, column] > threshold else "black",
+                fontsize=8,
+            )
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
 
-    # 打印两个数据集对比结果
-    print(f"\n{'='*50}")
-    print(f"【跨数据集泛化能力对比汇总】")
-    print(f"{'='*50}")
-    print(f"{'数据集':<15s} {'准确率':<10s} {'F1-score':<10s}")
-    print(f"{'FER-2013':<15s} {fer_acc*100:<9.2f}% {fer_f1:<10.4f}")
-    print(f"{'CK+':<15s} {ck_acc*100:<9.2f}% {ck_f1:<10.4f}")
 
-    # 保存完整双数据集结果到文件
-    os.makedirs(r"D:\emotion_exp\exp_result", exist_ok=True)
-    with open(r"D:\emotion_exp\exp_result\deep_results.txt", "w", encoding="utf-8") as f:
-        f.write("==== FER2013 测试结果 ====\n")
-        f.write(f"Accuracy: {fer_acc*100:.2f}%\n")
-        f.write(f"F1-score: {fer_f1:.4f}\n\n")
-        f.write("==== CK+ 测试结果 ====\n")
-        f.write(f"Accuracy: {ck_acc*100:.2f}%\n")
-        f.write(f"F1-score: {ck_f1:.4f}\n")
-    print("\n全部评测结果已保存至 exp_result/deep_results.txt")
+def printable_metrics(name: str, metrics: dict) -> None:
+    print(f"\n{name}:")
+    print(f"  samples: {metrics['samples']}")
+    print(f"  accuracy: {metrics['accuracy'] * 100:.2f}%")
+    print(f"  weighted F1: {metrics['f1_weighted']:.4f}")
+    print(f"  macro F1: {metrics['f1_macro']:.4f}")
+    print(f"  macro precision: {metrics['precision_macro']:.4f}")
+    print(f"  macro recall: {metrics['recall_macro']:.4f}")
+
+
+def main() -> None:
+    args = parse_args()
+    device = resolve_device(args.device)
+    checkpoint_path = args.checkpoint
+    if checkpoint_path is None:
+        candidates = [
+            Path(__file__).resolve().parent / "emotion_best.pth",
+            Path(__file__).resolve().parent.parent / "exp_result" / "checkpoints" / "emotion_best.pth",
+        ]
+        checkpoint_path = next((path for path in candidates if path.is_file()), candidates[-1])
+    model, metadata = load_checkpoint(checkpoint_path, device=device)
+    image_size = int(metadata.get("image_size", 96))
+    transform = get_transforms(image_size, train=False)
+
+    results: dict[str, dict] = {}
+    fer_root = resolve_fer_root(args.data_dir)
+    if args.dataset in {"fer", "both"}:
+        fer_dataset = FERDataset(fer_root, split="test", transform=transform)
+        fer_metrics = evaluate_dataset(model, fer_dataset, device, args.batch_size, args.workers)
+        results["fer2013"] = fer_metrics
+        save_confusion_matrix(
+            fer_metrics["confusion_matrix"],
+            args.output_dir / "confusion_matrix_fer2013.png",
+            "FER2013 confusion matrix",
+        )
+
+    if args.dataset in {"ck+", "both"} and Path(args.ckplus_dir).is_dir():
+        ck_dataset = CKPlusDataset(args.ckplus_dir, transform=transform)
+        ck_metrics = evaluate_dataset(model, ck_dataset, device, args.batch_size, args.workers)
+        results["ckplus"] = ck_metrics
+        save_confusion_matrix(
+            ck_metrics["confusion_matrix"],
+            args.output_dir / "confusion_matrix_ckplus.png",
+            "CK+ confusion matrix",
+        )
+
+    clean_results = {}
+    for name, metrics in results.items():
+        clean = {key: value for key, value in metrics.items() if not key.startswith("_")}
+        clean_results[name] = clean
+        printable_metrics(name.upper(), metrics)
+
+    output_path = args.output_dir / "metrics.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(clean_results, handle, indent=2, ensure_ascii=False)
+    print(f"\nSaved metrics to {output_path}")
+
 
 if __name__ == "__main__":
     main()
