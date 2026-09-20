@@ -1,185 +1,182 @@
 # 基于深度学习的人脸表情识别
 
-> 一个用于机器学习与计算机视觉课程学习、复盘和记录的项目。  
-> 项目在 Trae 中完成，核心目标是对比传统机器学习方法与深度学习方法的七类人脸表情识别效果，并进一步实现跨数据集评估、特征可视化和摄像头实时推理。
+> 一个用于机器学习与计算机视觉学习、复盘和持续改进的七类人脸表情识别项目。
 
-## 项目简介
+项目最初使用一个简单的三层 CNN，在 FER2013 上训练几十轮后测试准确率约为 30%。在后续版本中，项目已从“课程代码”重构为可配置、可复现、可实时运行的学习项目：
 
-人脸表情识别是计算机视觉中的典型分类任务。本项目围绕 7 类常见表情展开：
+- 使用预训练 MobileNetV3-Small 进行迁移学习，并通过数据增强和类别平衡改善训练效果
+- 保留 HOG + SVM 作为传统机器学习对照基线
+- 使用 FER2013 训练和测试，使用 CK+ 做跨数据集泛化评估
+- 输出 Accuracy、Weighted F1、Macro F1、分类报告和混淆矩阵
+- 使用真正的 Grad-CAM 展示模型关注区域
+- 使用 OpenCV YuNet 完成轻量级实时人脸检测，并支持 MTCNN/Haar 回退
+- 实时识别支持摄像头、视频和图片输入，包含预测平滑、FPS 显示和结果文件输出
 
-`angry`、`disgust`、`fear`、`happy`、`sad`、`surprise`、`neutral`
+> 本仓库是学习过程记录。数据集不随仓库上传，模型检查点默认也不提交，请按本文说明在本地生成。
 
-项目没有只停留在单一模型训练，而是完成了一套较完整的学习流程：
+## 当前版本改进
 
-- 使用 MTCNN 对 FER2013 人脸图像进行检测、关键点对齐和统一缩放
-- 构建 HOG + SVM 传统机器学习基线
-- 构建包含 BatchNorm、Dropout 和 CutMix 的三层 CNN
-- 在 FER2013 上训练和测试，在 CK+ 上做跨数据集泛化评估
-- 统计 Accuracy、Weighted F1-score 和混淆矩阵
-- 对卷积特征图和平均激活图进行可视化
-- 使用 OpenCV + MTCNN 实现摄像头实时表情识别
+与最初版本相比，主要改动如下：
 
-> 这是一个学习型项目，重点关注“从数据处理到训练、评估、可视化、部署”的完整实践过程。当前模型结构较简单，实验指标主要用于和自身的传统方法基线作对比，不代表生产环境效果。
+| 方面 | 原始版本 | 当前版本 |
+|---|---|---|
+| 模型 | 三层简单 CNN，从零训练 | MobileNetV3-Small 迁移学习，可切换 ResNet18/SimpleCNN |
+| 输入尺寸 | 48×48 | 默认 96×96，可通过参数调整 |
+| 数据增强 | 无 | RandomResizedCrop、水平翻转、旋转、颜色扰动 |
+| 类别不平衡 | 未处理 | WeightedRandomSampler |
+| 训练控制 | 固定 50 轮 | 自动设备选择、早停、学习率调度、梯度裁剪 |
+| 损失函数 | CrossEntropyLoss | CrossEntropyLoss + Label Smoothing |
+| 模型保存 | 只保存 state_dict | 保存架构、类别、输入尺寸、指标和优化器状态 |
+| 路径 | 写死 `D:\emotion_exp` | 基于项目根目录，可用环境变量覆盖 |
+| 评估 | 只保存 Accuracy/F1 | JSON 指标、分类报告和混淆矩阵图 |
+| 可视化 | 平均特征响应 | 标准 Grad-CAM 与特征图 |
+| 实时检测 | 依赖 TensorFlow/MTCNN | 默认 YuNet，支持 MTCNN/Haar 回退 |
+| 实时功能 | 只支持摄像头 | 摄像头、视频、图片、预测平滑、FPS、输出文件 |
 
 ## 项目流程
 
 ```mermaid
 flowchart LR
-    A[原始人脸图像] --> B[MTCNN 检测与关键点对齐]
-    B --> C[统一缩放为 48 x 48 RGB]
+    A[原始人脸图像] --> B[YuNet / MTCNN 检测与裁剪]
+    B --> C[统一尺寸与归一化]
     C --> D1[HOG 特征]
     D1 --> E1[SVM 分类器]
-    C --> D2[三层 CNN]
+    C --> D2[MobileNetV3-Small 迁移学习]
     D2 --> E2[7 类表情概率]
-    E1 --> F[Accuracy / F1 / 结果对比]
+    E1 --> F[Accuracy / F1 / 混淆矩阵]
     E2 --> F
-    E2 --> G[特征图与平均激活图]
-    E2 --> H[摄像头实时推理]
+    E2 --> G[Grad-CAM 可解释性]
+    E2 --> H[摄像头 / 视频 / 图片实时推理]
 ```
 
 ## 数据集
 
 ### FER2013
 
-FER2013 用于模型训练、验证和测试。
+FER2013 用于训练、验证和测试。对齐后的数据划分为：
 
-| 数据划分 | 原始图像数量 | 对齐后图像数量 |
-|---|---:|---:|
-| train | 25,120 | 23,212 |
-| val | 5,383 | 5,383 |
-| test | 5,384 | 5,384 |
+| 数据划分 | 图像数量 |
+|---|---:|
+| train | 23,212 |
+| val | 5,383 |
+| test | 5,384 |
 
-MTCNN 脚本会将灰度图像转换为三通道，先放大到 96 x 96 进行检测，再根据双眼关键点进行旋转校正，最后裁剪并统一输出为 48 x 48。
+类别包括：
+
+`angry`、`disgust`、`fear`、`happy`、`sad`、`surprise`、`neutral`
+
+FER2013 存在明显的类别不平衡。例如训练集中 `happy` 有 6,275 张，而 `disgust` 只有 380 张。因此当前训练默认使用 WeightedRandomSampler，对少数类进行重采样。
 
 ### CK+
 
-CK+ 主要用于测试模型在另一个数据集上的泛化能力。当前使用的数据包含：
+CK+ 用于评估跨数据集泛化能力。当前版本会把 `contempt` 近似映射到 `disgust`，并复用七分类模型。由于 CK+ 没有 `neutral` 类，且标签体系和采集环境与 FER2013 不同，CK+ 结果主要用于分析域差异，不适合与 FER2013 测试结果做严格同分布比较。
 
-| 表情目录 | 图像数量 | 映射到本项目类别 |
-|---|---:|---|
-| anger | 135 | angry |
-| contempt | 54 | disgust |
-| disgust | 176 | disgust |
-| fear | 75 | fear |
-| happy | 207 | happy |
-| sadness | 84 | sad |
-| surprise | 249 | surprise |
+数据集仅保存在本地，不纳入 Git 仓库。使用时请从官方或合法发布渠道获取，并遵守原始许可。
 
-> CK+ 中没有 `neutral` 数据，`contempt` 也被近似映射为 `disgust`。因此 CK+ 结果更适合作为跨数据集学习和问题分析，不应直接与 FER2013 测试结果做严格意义上的同分布比较。
+## 模型与训练
 
-数据集仅保存在本地，不纳入 Git 仓库。使用时请从数据集官方或合法发布渠道获取，并遵守原始许可。
+### MobileNetV3-Small
 
-## 方法说明
+默认模型使用 ImageNet 预训练权重，替换最后的分类层为 7 类输出：
 
-### 1. HOG + SVM 基线
+- 特征提取：MobileNetV3-Small
+- 输入：96×96 RGB
+- 分类头：Linear(576→256) + Hardswish + Dropout + Linear(256→7)
+- 参数量：约 1.08M
 
-`HOGSVM.py` 提取传统手工特征作为对比基线：
+### 训练策略
 
-- 输入尺寸：48 x 48 灰度图
-- HOG：窗口 48 x 48，Cell 16 x 16，Block 8 x 8，9 个方向 bin
+- 训练/验证集：FER2013 aligned
+- Batch Size：128
+- 最大 Epoch：25
+- 初始阶段冻结特征提取器 1 轮
+- 分类头学习率：`5e-4`
+- 特征提取器学习率：`5e-5`
+- 优化器：AdamW
+- 权重衰减：`1e-4`
+- 学习率调度：ReduceLROnPlateau
+- 早停：连续 6 轮验证准确率没有提升时停止
+- 损失：CrossEntropyLoss + Label Smoothing
+- 数据增强：随机缩放裁剪、水平翻转、旋转、颜色扰动
+- 类别平衡：WeightedRandomSampler
+
+训练会保存：
+
+- `exp_result/checkpoints/emotion_best.pth`：验证集效果最好的模型
+- `exp_result/checkpoints/emotion_last.pth`：最后一个 Epoch 的模型
+- `exp_result/checkpoints/training_history.json`：每轮训练/验证指标和配置
+
+### HOG + SVM 基线
+
+`HOGSVM.py` 保留传统方法对照：
+
+- 输入：48×48 灰度图
+- HOG：窗口 48×48，Cell 16×16，Block 8×8，9 个 bin
 - 分类器：RBF 核 SVM
-- 参数：`C=10`，`gamma='scale'`，`class_weight='balanced'`
-
-### 2. 三层 CNN
-
-`model.py` 中的 `EmotionNet` 由一个简单 CNN 构成：
-
-| 阶段 | 结构 |
-|---|---|
-| Conv Block 1 | Conv 3→32, BatchNorm, ReLU, MaxPool |
-| Conv Block 2 | Conv 32→64, BatchNorm, ReLU, MaxPool |
-| Conv Block 3 | Conv 64→128, BatchNorm, ReLU, MaxPool |
-| 分类头 | Dropout 0.5, Linear 128×6×6→7 |
-
-模型同时保留中间特征图，供后续可视化和分析使用。
-
-### 3. 训练策略
-
-`train.py` 中的主要训练配置：
-
-- 设备：CPU
-- Epoch：50
-- Batch Size：32
-- 损失函数：CrossEntropyLoss
-- 优化器：Adam，初始学习率 `1e-3`
-- 学习率调度：StepLR，每 10 个 Epoch 乘以 0.5
-- 数据增强：前 20 个 Epoch 后，以 30% 概率使用 CutMix
-- 模型选择：保存验证集准确率最高的参数
-
-### 4. 评估与可视化
-
-- `judge.py`：计算 Accuracy、Weighted F1-score 和混淆矩阵，并分别在 FER2013、CK+ 上评估
-- `compare.py`：对比 HOG + SVM 与 CNN 的指标
-- `visualize.py`：输出三组卷积层特征图，以及基于最后一层特征平均值的简单激活图
-- `real_time.py`：调用摄像头，结合 MTCNN 人脸检测完成实时表情分类与 FPS 显示
+- 参数：`C=10`、`gamma='scale'`、`class_weight='balanced'`
+- 输出：SVM 模型、JSON 指标、Accuracy/F1 文本结果
 
 ## 实验结果
 
-当前提交对应的实验结果如下：
+> 下表会在正式训练和完整评估结束后更新。
 
 | 方法 / 数据集 | Accuracy | Weighted F1-score |
 |---|---:|---:|
 | HOG + SVM / FER2013 test | 34.38% | 0.2881 |
-| 三层 CNN / FER2013 test | **37.24%** | **0.3259** |
-| 三层 CNN / CK+ 跨数据集测试 | 26.53% | 0.2775 |
-
-相对 HOG + SVM 基线，CNN 在 FER2013 测试集上的表现提升：
-
-- Accuracy：`+2.86` 个百分点
-- Weighted F1-score：`+0.0378`
-
-### 结果分析
-
-1. CNN 能够从数据中自动学习局部纹理与形状特征，在该数据集和当前配置下略优于手工 HOG 特征。
-2. 整体准确率仍然有限，说明简单 CNN、CPU 训练、数据量、类别不平衡和表情标注歧义都会影响结果。
-3. CK+ 跨数据集结果明显下降，体现了不同数据集在人物、采集条件、表情定义和标签体系上的分布差异。
-4. 当前 `visualize.py` 输出的是特征图和平均激活图，并非严格的 Grad-CAM，结果主要用于直观观察网络响应。
+| MobileNetV3-Small / FER2013 test | 待训练完成后更新 | 待训练完成后更新 |
+| MobileNetV3-Small / CK+ 跨数据集测试 | 待训练完成后更新 | 待训练完成后更新 |
 
 ## 项目结构
 
 ```text
 emotion_exp/
 ├── code/
+│   ├── config.py          # 路径、类别和默认配置
+│   ├── data.py            # 数据集、增强和类别平衡
+│   ├── model.py           # 模型工厂、检查点、Grad-CAM 目标层
+│   ├── train.py           # 迁移学习训练入口
+│   ├── judge.py           # FER2013/CK+ 评估与混淆矩阵
+│   ├── compare.py         # 传统方法与 CNN 指标对比
 │   ├── HOGSVM.py          # HOG + SVM 基线
-│   ├── compare.py         # 两种方法指标对比
-│   ├── judge.py           # 测试集与跨数据集评估
-│   ├── model.py           # CNN 与 FocalLoss 定义
-│   ├── mtcnn_align.py     # MTCNN 人脸检测与对齐
-│   ├── real_time.py       # 摄像头实时推理
-│   ├── requirements.txt   # Python 依赖
-│   ├── train.py           # CNN 训练脚本
-│   └── visualize.py       # 特征图和激活图可视化
+│   ├── visualize.py       # Grad-CAM 和卷积特征图
+│   ├── face_detector.py   # YuNet/MTCNN/Haar 检测封装
+│   ├── real_time.py       # 摄像头、视频和图片推理
+│   └── mtcnn_align.py     # 数据集人脸对齐
+├── models/
+│   ├── README.md
+│   └── face_detection_yunet_2023mar.onnx
 ├── dataset/               # 本地数据集，不上传
-├── exp_result/            # 指标文本与可视化结果
-├── paper/                 # 课程报告等资料
-└── venv/                  # 本地虚拟环境，不上传
+├── exp_result/            # 指标、可视化与本地模型
+├── paper/                 # 课程资料
+└── venv/                  # 本地环境，不上传
 ```
-
-Git 仓库只提交源码、说明文档和指标文本；数据集、虚拟环境、模型权重和由数据集生成的图片默认不提交。
 
 ## 快速开始
 
-### 1. 创建环境
+### 1. 安装依赖
+
+推荐使用 Python 3.10：
 
 ```powershell
-cd D:\emotion_exp
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r code\requirements.txt
 ```
 
-### 2. 准备数据目录
+如果使用已有的 Conda 环境，也可以直接安装：
+
+```powershell
+pip install -r code\requirements.txt
+```
+
+### 2. 准备数据
 
 ```text
 dataset/
-├── FER2013/
+├── FER2013_aligned/
 │   ├── train/{angry,disgust,fear,happy,sad,surprise,neutral}/
 │   ├── val/{angry,disgust,fear,happy,sad,surprise,neutral}/
 │   └── test/{angry,disgust,fear,happy,sad,surprise,neutral}/
-├── FER2013_aligned/
-│   ├── train/...
-│   ├── val/...
-│   └── test/...
 └── CK+/
     ├── anger/
     ├── contempt/
@@ -190,72 +187,145 @@ dataset/
     └── surprise/
 ```
 
-### 3. 运行脚本
+如果只有原始 FER2013，可先执行：
 
 ```powershell
-# 人脸检测、对齐并生成 FER2013_aligned
-python code\mtcnn_align.py
-
-# 训练 CNN
-python code\train.py
-
-# 在 FER2013 和 CK+ 上评估
-python code\judge.py
-
-# 训练并评估 HOG + SVM
-python code\HOGSVM.py
-
-# 对比两种方法的指标
-python code\compare.py
-
-# 生成特征图与激活图
-python code\visualize.py
-
-# 打开摄像头实时识别
-python code\real_time.py
+python code\mtcnn_align.py --input dataset\FER2013 --output dataset\FER2013_aligned
 ```
 
-> 当前源码中的数据集路径、模型路径和输出路径使用了 `D:\emotion_exp\...` 绝对路径。换到其他电脑或目录运行时，需要先修改这些常量。后续可以将路径统一改为命令行参数或配置文件。
+### 3. 训练
+
+```powershell
+python code\train.py `
+  --arch mobilenet_v3_small `
+  --image-size 96 `
+  --batch-size 128 `
+  --epochs 25 `
+  --freeze-epochs 1 `
+  --output-dir exp_result\checkpoints
+```
+
+第一次运行会下载约 10 MB 的 ImageNet 预训练权重。也可以使用 `--no-pretrained` 进行从零训练对照。
+
+### 4. 评估
+
+```powershell
+python code\judge.py `
+  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --dataset both `
+  --output-dir exp_result
+```
+
+会生成：
+
+- `exp_result/metrics.json`
+- `exp_result/confusion_matrix_fer2013.png`
+- `exp_result/confusion_matrix_ckplus.png`
+
+### 5. 方法对比
+
+```powershell
+python code\HOGSVM.py
+python code\compare.py
+```
+
+### 6. Grad-CAM 可视化
+
+```powershell
+python code\visualize.py `
+  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --samples-per-class 1 `
+  --feature-maps
+```
+
+### 7. 实时识别
+
+摄像头：
+
+```powershell
+python code\real_time.py `
+  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --source 0 `
+  --detector yunet
+```
+
+图片：
+
+```powershell
+python code\real_time.py `
+  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --source path\to\image.jpg `
+  --output exp_result\result.jpg `
+  --no-display
+```
+
+视频：
+
+```powershell
+python code\real_time.py `
+  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --source path\to\video.mp4 `
+  --output exp_result\result.mp4 `
+  --no-display
+```
+
+按 `q` 或 `Esc` 退出摄像头/视频窗口。
+
+## 结果文件说明
+
+`exp_result/metrics.json` 包含：
+
+- 数据集样本数量
+- Accuracy
+- Weighted F1
+- Macro F1
+- Macro Precision / Recall
+- 每个类别的 Precision / Recall / F1
+- 完整混淆矩阵
+
+`exp_result/hog_svm_results.json` 包含传统基线指标。`compare.py` 会读取两种方法的指标并生成 `comparison.json`。
 
 ## 学习总结
 
-通过这个项目，我完成了从“单个算法练习”到“完整视觉项目”的一次串联，主要收获包括：
+这个项目记录的不仅仅是一次模型训练，而是围绕同一个任务不断定位问题、重构和验证的过程：
 
-- 理解了图像分类项目的基本流程：数据组织、预处理、训练、验证、测试和结果分析。
-- 理解了卷积、池化、BatchNorm、Dropout、学习率调度和 CutMix 在 CNN 中的作用。
-- 通过 HOG + SVM 与 CNN 的对照实验，认识了手工特征和自动特征学习的差异。
-- 学会使用 Accuracy、F1-score、混淆矩阵和跨数据集评估，而不是只关注单一准确率。
-- 学会把 MTCNN、PyTorch 和 OpenCV 串起来，完成从静态图片到摄像头实时推理的完整流程。
-- 认识到模型效果不仅取决于网络结构，还受到数据质量、类别分布、标签定义和实验设置的影响。
+1. 认识到简单 CNN 从零训练不一定适合小数据集，迁移学习通常更有效。
+2. 学会处理类别不平衡，而不是只看整体准确率。
+3. 学会使用验证集、早停、学习率调度和检查点管理控制训练过程。
+4. 学会把训练、评估、可视化和部署拆分为可复用模块。
+5. 理解跨数据集测试中的领域偏移问题。
+6. 理解模型准确率之外，实时系统的检测速度、稳定性和输入容错同样重要。
+7. 通过 Grad-CAM 观察模型是否真正关注眼睛、眉毛、嘴巴等表情相关区域。
 
 ## 当前局限
 
-- CNN 结构较浅，没有使用预训练模型或迁移学习。
-- 训练在 CPU 上完成，搜索空间和训练轮次受限。
-- FER2013 存在类别不平衡、标签噪声和低分辨率问题。
-- CK+ 的类别映射是近似处理，且缺少 neutral 类，跨数据集指标的解释需要谨慎。
-- 代码中的路径为绝对路径，可移植性不足。
-- 激活图使用特征平均，不是严格意义上的 Grad-CAM 或 CAM。
-- `model.py` 中定义了 FocalLoss，但当前训练脚本仍使用 CrossEntropyLoss。
+- FER2013 本身存在低分辨率、标注噪声和类别模糊问题。
+- CK+ 与 FER2013 的标签体系不同，跨数据集指标只能作为参考。
+- CPU 训练速度有限，尚未进行大规模超参数搜索。
+- 实时系统使用单帧检测和简单中心位置平滑，没有实现完整的人脸跟踪。
+- YuNet 对极端侧脸、遮挡和光线不足场景仍可能失效。
+- 模型只输出离散表情类别，未处理混合表情和强度回归。
 
 ## 后续计划
 
-- 将绝对路径改为配置文件或命令行参数。
-- 增加随机裁剪、翻转、亮度调整等数据增强。
-- 对比 ResNet18、MobileNetV3 等预训练模型。
-- 使用类别权重、Focal Loss 或重采样方法处理类别不平衡。
-- 实现标准 Grad-CAM，提升可视化解释性。
-- 增加训练曲线、混淆矩阵图片和误差样本分析。
-- 将实时推理封装为更易用的桌面或 Web Demo。
-- 在保持代码清晰的前提下，尝试 GPU 训练和更规范的实验记录。
+- 在 GPU 环境下进行完整超参数搜索和交叉验证。
+- 尝试 EfficientNet-B0、ConvNeXt-Tiny 等更强的主干网络。
+- 引入 Focal Loss、MixUp、CutMix 和更强的人脸专用增强。
+- 使用 DeepFace、RetinaFace 或 YOLO-Face 改善复杂场景下的人脸检测。
+- 引入 ByteTrack 等轻量跟踪算法，为每个人脸维护稳定的时序状态。
+- 增加 Web 或桌面界面，并支持摄像头选择、阈值和模型切换。
+- 通过 ONNX Runtime 或 OpenVINO 优化 CPU 推理速度。
 
-## 参考资料
+## 参考资料与模型许可
 
 - [FER2013 Dataset](https://www.kaggle.com/datasets/msambare/fer2013)
 - [CK+ Dataset Resources](http://www.jeffcohn.net/Resources/)
+- [MobileNetV3](https://arxiv.org/abs/1905.02244)
+- [YuNet Face Detection Model](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
 - [MTCNN Python Implementation](https://github.com/ipazc/mtcnn)
-- [CutMix: Regularization Strategy to Train Strong Classifiers with Localizable Features](https://arxiv.org/abs/1905.04899)
+
+仓库中的 YuNet ONNX 模型来自 OpenCV Zoo，使用 Apache-2.0 许可证；具体说明见 `models/README.md`。
 
 ---
 
-如果这个项目对你有帮助，欢迎通过 Issue 记录新的想法、问题或改进方向。这个仓库也会作为我学习计算机视觉和深度学习过程的一份阶段记录。
+本仓库会持续记录训练结果、问题定位和功能完善过程。
