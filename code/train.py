@@ -44,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-balanced", action="store_true")
     parser.add_argument("--class-weight-power", type=float, default=0.0, help="Exponent for inverse-frequency loss weights; 0 disables")
+    parser.add_argument("--mixup-alpha", type=float, default=0.0, help="MixUp Beta distribution alpha; 0 disables")
+    parser.add_argument("--scheduler", choices=["plateau", "cosine"], default="cosine")
     parser.add_argument("--resume", type=Path, default=None, help="Resume from emotion_last.pth or another checkpoint")
     return parser.parse_args()
 
@@ -91,6 +93,7 @@ def run_epoch(
     device: torch.device,
     optimizer: torch.optim.Optimizer | None = None,
     scaler: torch.amp.GradScaler | None = None,
+    mixup_alpha: float = 0.0,
 ) -> tuple[float, float]:
     training = optimizer is not None
     model.train(training)
@@ -108,8 +111,15 @@ def run_epoch(
 
         with torch.set_grad_enabled(training):
             with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-                logits = model(images)
-                loss = criterion(logits, labels)
+                if training and mixup_alpha > 0.0 and images.size(0) > 1:
+                    lam = float(np.random.beta(mixup_alpha, mixup_alpha))
+                    permuted = torch.randperm(images.size(0), device=device)
+                    mixed = lam * images + (1.0 - lam) * images[permuted]
+                    logits = model(mixed)
+                    loss = lam * criterion(logits, labels) + (1.0 - lam) * criterion(logits, labels[permuted])
+                else:
+                    logits = model(images)
+                    loss = criterion(logits, labels)
 
             if training:
                 if scaler is not None:
@@ -195,12 +205,19 @@ def main() -> None:
     optimizer = make_optimizer(model, args)
     if args.resume is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="max",
-        factor=0.5,
-        patience=2,
-    )
+    if args.scheduler == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, args.epochs - start_epoch),
+            eta_min=1e-6,
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="max",
+            factor=0.5,
+            patience=2,
+        )
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
     config = vars(args).copy()
@@ -224,9 +241,14 @@ def main() -> None:
         trainable = not (args.freeze_epochs > 0 and epoch <= args.freeze_epochs)
         set_backbone_trainable(model, trainable)
 
-        train_loss, train_acc = run_epoch(model, train_loader, criterion, device, optimizer, scaler)
+        train_loss, train_acc = run_epoch(
+            model, train_loader, criterion, device, optimizer, scaler, args.mixup_alpha
+        )
         val_loss, val_acc = run_epoch(model, val_loader, criterion, device)
-        scheduler.step(val_acc)
+        if args.scheduler == "cosine":
+            scheduler.step()
+        else:
+            scheduler.step(val_acc)
 
         elapsed = time.perf_counter() - start
         current_lr = optimizer.param_groups[-1]["lr"]
@@ -289,6 +311,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
 
 
 

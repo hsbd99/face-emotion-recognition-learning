@@ -37,6 +37,7 @@ def get_transforms(image_size: int, train: bool) -> transforms.Compose:
                 ),
                 transforms.ToTensor(),
                 transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                transforms.RandomErasing(p=0.25, scale=(0.02, 0.12), ratio=(0.3, 3.3)),
             ]
         )
 
@@ -232,3 +233,4 @@ __all__ = [
     "get_transforms",
     "resolve_fer_root",
 ]
+
