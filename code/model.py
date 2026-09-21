@@ -42,7 +42,7 @@ class EmotionNet(nn.Module):
                 nn.Linear(in_features, 256),
                 nn.Hardswish(),
                 nn.Dropout(dropout),
-                nn.Linear(256, num_classes),
+                nn.Linear(128, num_classes),
             )
         elif arch == "resnet18":
             try:
@@ -61,6 +61,45 @@ class EmotionNet(nn.Module):
                 nn.Dropout(dropout),
                 nn.Linear(in_features, num_classes),
             )
+        elif arch == "fer_cnn":
+            self.features = nn.Sequential(
+                nn.Conv2d(3, 32, 3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(32, 32, 3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2),
+                nn.Conv2d(32, 64, 3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2),
+                nn.Conv2d(64, 128, 3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, 3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2),
+                nn.Conv2d(128, 256, 3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 256, 3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2),
+            )
+            self.avgpool = nn.AdaptiveAvgPool2d(1)
+            self.classifier = nn.Sequential(
+                nn.Dropout(dropout),
+                nn.Linear(256, 128),
+                nn.ReLU(inplace=True),
+                nn.Dropout(dropout),
+                nn.Linear(128, num_classes),
+            )
         elif arch == "simple_cnn":
             self.features = nn.Sequential(
                 nn.Conv2d(3, 32, 3, padding=1),
@@ -68,11 +107,11 @@ class EmotionNet(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
                 nn.Conv2d(32, 64, 3, padding=1),
-                nn.BatchNorm2d(64),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
-                nn.Conv2d(64, 128, 3, padding=1),
-                nn.BatchNorm2d(128),
+                nn.Conv2d(32, 64, 3, padding=1),
+                nn.BatchNorm2d(64),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
             )
@@ -99,6 +138,8 @@ class EmotionNet(nn.Module):
         """Return the last convolutional layer used by Grad-CAM."""
         if self.arch == "simple_cnn":
             return self.features[-3]
+        if self.arch == "fer_cnn":
+            return self.features[-1]
         if self.arch == "mobilenet_v3_small":
             return self.features[-1]
         if self.arch == "resnet18":
@@ -191,3 +232,5 @@ if __name__ == "__main__":
     dummy = torch.randn(2, 3, 96, 96)
     output = model(dummy)
     print("output:", output.shape, "parameters:", model.count_parameters())
+
+

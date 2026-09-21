@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arch",
         default=DEFAULT_ARCH,
-        choices=["mobilenet_v3_small", "resnet18", "simple_cnn"],
+        choices=["mobilenet_v3_small", "resnet18", "fer_cnn", "simple_cnn"],
     )
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE)
     parser.add_argument("--epochs", type=int, default=30)
@@ -289,6 +289,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 
