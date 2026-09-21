@@ -35,3 +35,4 @@ Desktop.ini
 exp_result/smoke_*/
 !models/face_detection_yunet_2023mar.onnx
 *.joblib
+exp_result/exp_*/

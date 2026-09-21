@@ -47,3 +47,32 @@ This indicates overfitting or an overly aggressive balanced-sampling strategy. B
 5. Update the README results table.
 6. Smoke-test `real_time.py` with a webcam, image, and video.
 7. Push the complete local commit history to GitHub.
+
+## 2026-09-21
+
+### Completed
+
+- Added resume support and configurable class weighting to `train.py`.
+- Added a lightweight `fer_cnn` architecture specialized for 48x48 FER2013 inputs.
+- Added MixUp, RandomErasing, and a cosine learning-rate schedule.
+
+### Experiments
+
+- `mobilenet_v3_small` transfer learning at 96x96 still overfit or plateaued near 27-31% validation accuracy in the first few epochs.
+- `fer_cnn` without class weighting reached a best validation accuracy of `33.40%` and test accuracy `35.01%`.
+  - The confusion matrix showed very low recall for `fear`, `sad`, `disgust`, and `angry`.
+  - This indicates class imbalance is a major remaining problem.
+- A new class-weighted `fer_cnn` run was started with `class-weight-power 0.5`, MixUp `0.1`, cosine schedule, and was stopped after epoch 2 at the user's request.
+
+### Current checkpoint
+
+The current `exp_result/checkpoints/emotion_best.pth` is from the stopped class-weighted run and is not yet representative. Do not use it as a final result.
+
+### Next tasks
+
+1. Resume the class-weighted `fer_cnn` run and let it train until early stopping.
+2. Evaluate the best checkpoint with `judge.py` and compare accuracy plus macro F1.
+3. Decide whether to keep `fer_cnn` or return to a pretrained backbone with a longer linear-probe/fine-tune schedule.
+4. Run the HOG + SVM baseline and `compare.py`.
+5. Smoke-test the real-time system with camera, image, and video inputs.
+6. Finalize the README results table and push the completed history.
