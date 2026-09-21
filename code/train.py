@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-balanced", action="store_true")
+    parser.add_argument("--class-weight-power", type=float, default=0.0, help="Exponent for inverse-frequency loss weights; 0 disables")
+    parser.add_argument("--resume", type=Path, default=None, help="Resume from emotion_last.pth or another checkpoint")
     return parser.parse_args()
 
 
@@ -146,14 +148,53 @@ def main() -> None:
         balanced=not args.no_balanced,
     )
 
-    model = build_model(
-        arch=args.arch,
-        num_classes=len(EMOTIONS),
-        pretrained=not args.no_pretrained,
-        dropout=args.dropout,
-    ).to(device)
-    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    start_epoch = 0
+    best_accuracy = -1.0
+    history: list[dict[str, Any]] = []
+    model = None
+
+    if args.resume is not None:
+        resume_path = args.resume.expanduser().resolve()
+        if not resume_path.is_file():
+            raise FileNotFoundError(f"Resume checkpoint not found: {resume_path}")
+        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        resume_arch = checkpoint.get("arch", args.arch)
+        num_classes = int(checkpoint.get("num_classes", len(EMOTIONS)))
+        model = build_model(
+            arch=resume_arch,
+            num_classes=num_classes,
+            pretrained=False,
+            dropout=args.dropout,
+        ).to(device)
+        model.load_state_dict(checkpoint["model_state"])
+        start_epoch = int(checkpoint.get("epoch", 0))
+        best_accuracy = float(checkpoint.get("metrics", {}).get("val_accuracy", -1.0))
+        history_path = args.output_dir / "training_history.json"
+        if history_path.is_file():
+            history = json.loads(history_path.read_text(encoding="utf-8")).get("history", [])
+        print(f"Resumed from {resume_path} (epoch {start_epoch}, best val acc {best_accuracy:.4f})")
+    else:
+        model = build_model(
+            arch=args.arch,
+            num_classes=len(EMOTIONS),
+            pretrained=not args.no_pretrained,
+            dropout=args.dropout,
+        ).to(device)
+
+    class_weights = None
+    if args.class_weight_power > 0:
+        counts = torch.tensor(
+            [float(class_counts.get(emotion, 1)) for emotion in EMOTIONS],
+            dtype=torch.float32,
+        )
+        weights = (counts.sum() / counts.clamp_min(1.0)) ** args.class_weight_power
+        weights = weights / weights.sum() * len(EMOTIONS)
+        class_weights = weights.to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=args.label_smoothing)
     optimizer = make_optimizer(model, args)
+    if args.resume is not None and "optimizer_state" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="max",
@@ -166,19 +207,19 @@ def main() -> None:
     config["data_root"] = str(data_root)
     config["device"] = str(device)
     config["class_counts"] = class_counts
+    config["class_weights"] = None if class_weights is None else class_weights.tolist()
     config["parameters"] = model.count_parameters()
-    history: list[dict[str, Any]] = []
-    best_accuracy = -1.0
     epochs_without_improvement = 0
     best_path = args.output_dir / "emotion_best.pth"
     last_path = args.output_dir / "emotion_last.pth"
 
     print(f"Device: {device}")
-    print(f"Architecture: {args.arch} ({model.count_parameters():,} trainable parameters)")
+    print(f"Architecture: {model.arch} ({model.count_parameters():,} trainable parameters)")
     print(f"Dataset: {data_root}")
     print(f"Class counts: {class_counts}")
+    print(f"Class weights: {config['class_weights']}")
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         start = time.perf_counter()
         trainable = not (args.freeze_epochs > 0 and epoch <= args.freeze_epochs)
         set_backbone_trainable(model, trainable)
@@ -248,4 +289,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 
