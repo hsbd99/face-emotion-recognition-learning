@@ -76,3 +76,22 @@ The current `exp_result/checkpoints/emotion_best.pth` is from the stopped class-
 4. Run the HOG + SVM baseline and `compare.py`.
 5. Smoke-test the real-time system with camera, image, and video inputs.
 6. Finalize the README results table and push the completed history.
+
+## 2026-09-22
+
+### Progress
+
+- Fixed a critical dimension bug in the MobileNet classification head caused by an earlier global find/replace (`nn.Linear(256, num_classes)` had been changed to `128`). Commit `ce8be99`.
+- Retrained MobileNetV3-Small with the fixed classifier. Best validation accuracy remained around `32.47%`.
+- Started a ResNet18 transfer-learning experiment and stopped it at epoch 5 at the user's request. Validation accuracy at that point was `30.87%`, with no substantial improvement over previous runs.
+
+### Conclusion so far
+
+All current transfer-learning and from-scratch runs plateau around `30-36%`. This is close to the original project baseline, so the bottleneck is likely not only model architecture. The next session should focus on:
+
+1. Data quality and label inspection (spot-check FER2013_aligned samples and label distribution).
+2. A small controlled experiment with one simple model to isolate whether the pipeline, augmentation, or evaluation is limiting accuracy.
+3. Comparing against the original raw checkpoint as a legacy reference.
+4. If needed, introducing stronger per-class balancing without over-oversampling, or using a face-specific pretrained model.
+
+Current checkpoint is not a final result.
