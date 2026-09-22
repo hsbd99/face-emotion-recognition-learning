@@ -42,7 +42,7 @@ class EmotionNet(nn.Module):
                 nn.Linear(in_features, 256),
                 nn.Hardswish(),
                 nn.Dropout(dropout),
-                nn.Linear(128, num_classes),
+                nn.Linear(256, num_classes),
             )
         elif arch == "resnet18":
             try:
@@ -232,5 +232,6 @@ if __name__ == "__main__":
     dummy = torch.randn(2, 3, 96, 96)
     output = model(dummy)
     print("output:", output.shape, "parameters:", model.count_parameters())
+
 
 
