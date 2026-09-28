@@ -1,4 +1,4 @@
-"""Compare the CNN and HOG + SVM baselines from saved metrics."""
+"""Compare saved model metrics."""
 from __future__ import annotations
 
 import argparse
@@ -24,7 +24,7 @@ def read_json(path: Path) -> dict | None:
 def read_legacy_text(path: Path) -> dict | None:
     if not path.is_file():
         return None
-    values = {}
+    values: dict[str, float] = {}
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             if ":" not in line:
@@ -41,44 +41,39 @@ def read_legacy_text(path: Path) -> dict | None:
 
 def main() -> None:
     args = parse_args()
-    cnn_metrics = read_json(args.output_dir / "metrics.json")
-    hog_metrics = read_json(args.output_dir / "hog_svm_results.json")
-    if cnn_metrics is None:
-        cnn_metrics = read_legacy_text(args.output_dir / "deep_results.txt")
-    if hog_metrics is None:
-        hog_metrics = read_legacy_text(args.output_dir / "hog_svm_results.txt")
+    cnn_all = read_json(args.output_dir / "metrics.json")
+    opencv_all = read_json(args.output_dir / "metrics_opencv.json")
+    hog = read_json(args.output_dir / "hog_svm_results.json") or read_legacy_text(
+        args.output_dir / "hog_svm_results.txt"
+    )
+    cnn = (cnn_all or {}).get("fer2013", cnn_all)
+    opencv = (opencv_all or {}).get("fer2013", opencv_all)
 
-    if cnn_metrics is None or hog_metrics is None:
-        raise FileNotFoundError(
-            "Required metric files are missing. Run judge.py and HOGSVM.py first."
-        )
+    rows = []
+    if hog is not None:
+        rows.append(("HOG + SVM", float(hog["accuracy"]), float(hog.get("f1_weighted", 0.0))))
+    if cnn is not None:
+        rows.append(("Custom CNN / ResNet", float(cnn["accuracy"]), float(cnn.get("f1_weighted", 0.0))))
+    if opencv is not None:
+        rows.append(("OpenCV pretrained FER", float(opencv["accuracy"]), float(opencv.get("f1_weighted", 0.0))))
 
-    cnn_fer = cnn_metrics.get("fer2013", cnn_metrics)
-    cnn_accuracy = float(cnn_fer["accuracy"])
-    cnn_f1 = float(cnn_fer.get("f1_weighted", cnn_fer.get("f1-score", 0.0)))
-    hog_accuracy = float(hog_metrics["accuracy"])
-    hog_f1 = float(hog_metrics.get("f1_weighted", hog_metrics.get("f1-score", 0.0)))
+    if not rows:
+        raise FileNotFoundError("No metric files found. Run judge.py, evaluate_pretrained.py and HOGSVM.py first.")
 
-    print("=" * 48)
-    print("Method comparison")
-    print("=" * 48)
-    print(f"{'Method':<16} {'Accuracy':>10} {'Weighted F1':>14}")
-    print("-" * 48)
-    print(f"{'HOG + SVM':<16} {hog_accuracy * 100:>9.2f}% {hog_f1:>14.4f}")
-    print(f"{'CNN':<16} {cnn_accuracy * 100:>9.2f}% {cnn_f1:>14.4f}")
-    print("-" * 48)
-    print(f"{'Improvement':<16} {(cnn_accuracy - hog_accuracy) * 100:>+9.2f}% {cnn_f1 - hog_f1:>+14.4f}")
+    print("=" * 64)
+    print("FER2013 method comparison")
+    print("=" * 64)
+    print(f"{'Method':<24} {'Accuracy':>12} {'Weighted F1':>16}")
+    print("-" * 64)
+    for name, accuracy, f1 in rows:
+        print(f"{name:<24} {accuracy * 100:>11.2f}% {f1:>16.4f}")
 
-    output = {
-        "hog_svm": {"accuracy": hog_accuracy, "f1_weighted": hog_f1},
-        "cnn": {"accuracy": cnn_accuracy, "f1_weighted": cnn_f1},
-        "improvement": {
-            "accuracy": cnn_accuracy - hog_accuracy,
-            "f1_weighted": cnn_f1 - hog_f1,
-        },
+    comparison = {
+        name: {"accuracy": accuracy, "f1_weighted": f1}
+        for name, accuracy, f1 in rows
     }
     with open(args.output_dir / "comparison.json", "w", encoding="utf-8") as handle:
-        json.dump(output, handle, indent=2, ensure_ascii=False)
+        json.dump(comparison, handle, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":

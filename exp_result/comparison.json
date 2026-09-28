@@ -1,0 +1,14 @@
+{
+  "HOG + SVM": {
+    "accuracy": 0.34380000000000005,
+    "f1_weighted": 0.2881
+  },
+  "Custom CNN / ResNet": {
+    "accuracy": 0.3805720653789004,
+    "f1_weighted": 0.33191422753091177
+  },
+  "OpenCV pretrained FER": {
+    "accuracy": 0.4524517087667162,
+    "f1_weighted": 0.3922741907844505
+  }
+}

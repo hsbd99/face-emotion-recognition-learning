@@ -150,6 +150,36 @@ class EmotionNet(nn.Module):
         return sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)
 
 
+class LegacyEmotionNet(nn.Module):
+    """Original three-convolution model used by the first project version."""
+
+    def __init__(self, num_classes: int = 7) -> None:
+        super().__init__()
+        self.arch = "legacy_cnn"
+        self.num_classes = num_classes
+        self.cnn = nn.Sequential()
+        self.cnn.conv1 = nn.Conv2d(3, 32, 3, padding=1)
+        self.cnn.bn1 = nn.BatchNorm2d(32)
+        self.cnn.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.cnn.bn2 = nn.BatchNorm2d(64)
+        self.cnn.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        self.cnn.bn3 = nn.BatchNorm2d(128)
+        self.cnn.pool = nn.MaxPool2d(2, 2)
+        self.cnn.dropout = nn.Dropout(0.5)
+        self.cnn.fc = nn.Linear(128 * 6 * 6, num_classes)
+
+    def forward(self, x: torch.Tensor, return_features: bool = False):
+        x1 = self.cnn.pool(torch.relu(self.cnn.bn1(self.cnn.conv1(x))))
+        x2 = self.cnn.pool(torch.relu(self.cnn.bn2(self.cnn.conv2(x1))))
+        x3 = self.cnn.pool(torch.relu(self.cnn.bn3(self.cnn.conv3(x2))))
+        logits = self.cnn.fc(self.cnn.dropout(x3.flatten(1)))
+        if return_features:
+            return logits, x3
+        return logits
+
+    def count_parameters(self) -> int:
+        return sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)
+
 def build_model(
     arch: str = "mobilenet_v3_small",
     num_classes: int = len(EMOTIONS),
@@ -208,9 +238,12 @@ def load_checkpoint(
         metadata = checkpoint
     else:
         # Original project checkpoints were raw SimpleCNN/EmotionNet state dicts.
-        arch = "simple_cnn"
-        num_classes = len(EMOTIONS)
         state_dict = checkpoint
+        is_legacy = isinstance(state_dict, dict) and any(
+            str(key).startswith("cnn.") for key in state_dict.keys()
+        )
+        arch = "legacy_cnn" if is_legacy else "simple_cnn"
+        num_classes = len(EMOTIONS)
         metadata = {
             "format_version": 1,
             "arch": arch,
@@ -220,7 +253,10 @@ def load_checkpoint(
             "metrics": {},
         }
 
-    model = build_model(arch=arch, num_classes=num_classes, pretrained=pretrained)
+    if arch == "legacy_cnn":
+        model = LegacyEmotionNet(num_classes=num_classes)
+    else:
+        model = build_model(arch=arch, num_classes=num_classes, pretrained=pretrained)
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
@@ -232,6 +268,7 @@ if __name__ == "__main__":
     dummy = torch.randn(2, 3, 96, 96)
     output = model(dummy)
     print("output:", output.shape, "parameters:", model.count_parameters())
+
 
 
 

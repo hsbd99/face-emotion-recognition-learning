@@ -95,3 +95,28 @@ All current transfer-learning and from-scratch runs plateau around `30-36%`. Thi
 4. If needed, introducing stronger per-class balancing without over-oversampling, or using a face-specific pretrained model.
 
 Current checkpoint is not a final result.
+
+## 2026-09-28 - Final functional milestone
+
+### Completed
+
+- Integrated the OpenCV Zoo MobileFaceNet facial-expression model as the default real-time backend.
+- Added `pretrained_fer.py` with 5-landmark face alignment and FER2013 label-order mapping.
+- Added `evaluate_pretrained.py` for reproducible evaluation.
+- Updated `real_time.py` to support both `opencv` and `torch` backends.
+- Added legacy checkpoint loading for the original `cnn.*` state dictionary.
+- Added automatic upscaling for very small images during face detection.
+- Updated `compare.py` to compare HOG + SVM, the self-trained model, and the pretrained model.
+- Updated README and model licensing documentation.
+- Verified Grad-CAM generation and both real-time backends.
+
+### Final verified results
+
+- Original three-layer CNN / FER2013 test: `37.24%`
+- Self-trained ResNet18 / FER2013 test: `38.06%`
+- OpenCV Zoo pretrained model / FER2013 test: `45.25%`
+- OpenCV Zoo pretrained model / CK+: `59.90%`
+
+### Notes
+
+The OpenCV Zoo model reports `88.27%` on RAF-DB, while this project measures `45.25%` on FER2013 because of domain and label-distribution differences. The self-trained model remains in the repository as a learning and comparison baseline.

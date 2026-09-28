@@ -1,59 +1,70 @@
 # 基于深度学习的人脸表情识别
 
-> 一个用于机器学习与计算机视觉学习、复盘和持续改进的七类人脸表情识别项目。
+> 一个从课程项目逐步完善到可训练、可评估、可视化并可实时运行的人脸表情识别项目。
 
-项目最初使用一个简单的三层 CNN，在 FER2013 上训练几十轮后测试准确率约为 30%。在后续版本中，项目已从“课程代码”重构为可配置、可复现、可实时运行的学习项目：
+项目最初使用一个简单的三层 CNN，在 FER2013 上训练几十轮后测试准确率约为 37%。后续版本完成了工程重构、训练流程改进、测试集评估、Grad-CAM 可视化和实时识别系统升级，并接入了 OpenCV Zoo 提供的高质量预训练表情模型。
 
-- 使用预训练 MobileNetV3-Small 进行迁移学习，并通过数据增强和类别平衡改善训练效果
-- 保留 HOG + SVM 作为传统机器学习对照基线
-- 使用 FER2013 训练和测试，使用 CK+ 做跨数据集泛化评估
+当前版本默认使用 OpenCV Zoo 的 MobileFaceNet 表情识别模型作为实时推理后端，同时保留自训练 PyTorch 模型，便于继续学习和实验。
+
+## 最终结果
+
+FER2013 测试集结果：
+
+| 方法 | Accuracy | Weighted F1 |
+|---|---:|---:|
+| HOG + SVM | 34.38% | 0.2881 |
+| 原始三层 CNN | 37.24% | 0.3259 |
+| 自训练 ResNet18 | 38.06% | 0.3319 |
+| OpenCV Zoo 预训练模型 | **45.25%** | **0.3923** |
+
+跨数据集结果：
+
+| 模型 / 数据集 | Accuracy | Weighted F1 |
+|---|---:|---:|
+| 自训练 ResNet18 / CK+ | 25.10% | 0.2605 |
+| OpenCV Zoo 预训练模型 / CK+ | **59.90%** | **0.5902** |
+
+说明：
+
+- OpenCV Zoo 预训练模型官方在 RAF-DB 上报告 88.27% Accuracy，但 FER2013 与 RAF-DB 存在明显领域差异，本项目在 FER2013 测试集上实测为 45.25%。
+- 自训练模型的最佳验证准确率为 38.12%，测试准确率为 38.06%。
+- 原始三层 CNN 使用原始检查点在当前评估流程中复现出 37.24% 测试准确率，说明数据与评估流程一致。
+- CK+ 标签体系与 FER2013 不完全一致，跨数据集结果主要用于观察领域差异。
+
+## 已完善的功能
+
+- 统一路径、类别与设备配置，去除硬编码依赖
+- 支持 FER2013、CK+ 数据加载、增强与类别平衡
+- 支持 SimpleCNN、FER-CNN、MobileNetV3-Small、ResNet18
+- 支持迁移学习、MixUp、RandomErasing、Label Smoothing、早停和余弦/Plateau 调度
+- 支持断点续训与类别权重
 - 输出 Accuracy、Weighted F1、Macro F1、分类报告和混淆矩阵
-- 使用真正的 Grad-CAM 展示模型关注区域
-- 使用 OpenCV YuNet 完成轻量级实时人脸检测，并支持 MTCNN/Haar 回退
-- 实时识别支持摄像头、视频和图片输入，包含预测平滑、FPS 显示和结果文件输出
-
-> 本仓库是学习过程记录。数据集不随仓库上传，模型检查点默认也不提交，请按本文说明在本地生成。
-
-## 当前版本改进
-
-与最初版本相比，主要改动如下：
-
-| 方面 | 原始版本 | 当前版本 |
-|---|---|---|
-| 模型 | 三层简单 CNN，从零训练 | MobileNetV3-Small 迁移学习，可切换 ResNet18/SimpleCNN |
-| 输入尺寸 | 48×48 | 默认 96×96，可通过参数调整 |
-| 数据增强 | 无 | RandomResizedCrop、水平翻转、旋转、颜色扰动 |
-| 类别不平衡 | 未处理 | WeightedRandomSampler |
-| 训练控制 | 固定 50 轮 | 自动设备选择、早停、学习率调度、梯度裁剪 |
-| 损失函数 | CrossEntropyLoss | CrossEntropyLoss + Label Smoothing |
-| 模型保存 | 只保存 state_dict | 保存架构、类别、输入尺寸、指标和优化器状态 |
-| 路径 | 写死 `D:\emotion_exp` | 基于项目根目录，可用环境变量覆盖 |
-| 评估 | 只保存 Accuracy/F1 | JSON 指标、分类报告和混淆矩阵图 |
-| 可视化 | 平均特征响应 | 标准 Grad-CAM 与特征图 |
-| 实时检测 | 依赖 TensorFlow/MTCNN | 默认 YuNet，支持 MTCNN/Haar 回退 |
-| 实时功能 | 只支持摄像头 | 摄像头、视频、图片、预测平滑、FPS、输出文件 |
+- 使用 Grad-CAM 展示模型关注区域
+- 使用 YuNet 做人脸检测，并支持 MTCNN/Haar 回退
+- 实时系统支持摄像头、视频、图片输入
+- 实时系统包含时序平滑、FPS、人脸框和结果文件输出
+- 默认使用 OpenCV Zoo 预训练 FER 模型，也可切换到自训练 PyTorch 模型
+- 旧版原始 `code/emotion_best.pth` 可以直接被新版加载器兼容读取
 
 ## 项目流程
 
 ```mermaid
 flowchart LR
-    A[原始人脸图像] --> B[YuNet / MTCNN 检测与裁剪]
-    B --> C[统一尺寸与归一化]
-    C --> D1[HOG 特征]
-    D1 --> E1[SVM 分类器]
-    C --> D2[MobileNetV3-Small 迁移学习]
-    D2 --> E2[7 类表情概率]
-    E1 --> F[Accuracy / F1 / 混淆矩阵]
-    E2 --> F
-    E2 --> G[Grad-CAM 可解释性]
-    E2 --> H[摄像头 / 视频 / 图片实时推理]
+    A[图像 / 摄像头 / 视频] --> B[YuNet 人脸检测]
+    B --> C{推理后端}
+    C --> D[OpenCV Zoo 预训练 FER]
+    C --> E[自训练 PyTorch 模型]
+    D --> F[时序平滑]
+    E --> F
+    F --> G[表情标签 / 置信度 / FPS]
+    B --> H[数据集对齐]
+    H --> I[HOG + SVM / CNN / ResNet 训练]
+    I --> J[Accuracy / F1 / 混淆矩阵 / Grad-CAM]
 ```
 
 ## 数据集
 
 ### FER2013
-
-FER2013 用于训练、验证和测试。对齐后的数据划分为：
 
 | 数据划分 | 图像数量 |
 |---|---:|
@@ -61,101 +72,90 @@ FER2013 用于训练、验证和测试。对齐后的数据划分为：
 | val | 5,383 |
 | test | 5,384 |
 
-类别包括：
+类别：`angry`、`disgust`、`fear`、`happy`、`sad`、`surprise`、`neutral`
 
-`angry`、`disgust`、`fear`、`happy`、`sad`、`surprise`、`neutral`
+FER2013 存在明显类别不平衡。例如训练集中 `happy` 有 6,275 张，而 `disgust` 只有 380 张。训练脚本支持：
 
-FER2013 存在明显的类别不平衡。例如训练集中 `happy` 有 6,275 张，而 `disgust` 只有 380 张。因此当前训练默认使用 WeightedRandomSampler，对少数类进行重采样。
+- 原分布训练
+- WeightedRandomSampler 重采样
+- 可调指数类别权重
 
 ### CK+
 
-CK+ 用于评估跨数据集泛化能力。当前版本会把 `contempt` 近似映射到 `disgust`，并复用七分类模型。由于 CK+ 没有 `neutral` 类，且标签体系和采集环境与 FER2013 不同，CK+ 结果主要用于分析域差异，不适合与 FER2013 测试结果做严格同分布比较。
+CK+ 用于跨数据集泛化评估。当前实现把 `contempt` 近似映射到 `disgust`。CK+ 数据集中没有 `neutral` 类，因此不能与 FER2013 结果做严格同分布比较。
 
-数据集仅保存在本地，不纳入 Git 仓库。使用时请从官方或合法发布渠道获取，并遵守原始许可。
+数据集不随仓库上传，请从官方或合法渠道获取并遵守原始许可。
 
-## 模型与训练
+## 模型结构
 
-### MobileNetV3-Small
+### 1. OpenCV Zoo 预训练模型（实时默认）
 
-默认模型使用 ImageNet 预训练权重，替换最后的分类层为 7 类输出：
+- 文件：`models/facial_expression_recognition_mobilefacenet_2022july.onnx`
+- 主干：MobileFaceNet
+- 输入：112×112
+- 类别：7 类
+- 来源：OpenCV Zoo Facial Expression Recognition
+- 许可证：Apache-2.0
+- 官方 RAF-DB 准确率：88.27%
+- 本项目 FER2013 测试准确率：45.25%
+- 本项目 CK+ 测试准确率：59.90%
 
-- 特征提取：MobileNetV3-Small
-- 输入：96×96 RGB
-- 分类头：Linear(576→256) + Hardswish + Dropout + Linear(256→7)
-- 参数量：约 1.08M
+实时模式下会使用 YuNet 提供的 5 点关键点做人脸对齐，再进行表情分类。
 
-### 训练策略
+### 2. 自训练 ResNet18
 
-- 训练/验证集：FER2013 aligned
-- Batch Size：128
-- 最大 Epoch：25
-- 初始阶段冻结特征提取器 1 轮
-- 分类头学习率：`5e-4`
-- 特征提取器学习率：`5e-5`
-- 优化器：AdamW
-- 权重衰减：`1e-4`
-- 学习率调度：ReduceLROnPlateau
-- 早停：连续 6 轮验证准确率没有提升时停止
-- 损失：CrossEntropyLoss + Label Smoothing
-- 数据增强：随机缩放裁剪、水平翻转、旋转、颜色扰动
-- 类别平衡：WeightedRandomSampler
+- 输入：96×96
+- 初始化：ImageNet 预训练
+- 最佳验证准确率：38.12%
+- FER2013 测试准确率：38.06%
+- 训练方式：分类头预热 + 全网络微调 + Plateau 调度
+- 检查点：`exp_result/checkpoints/emotion_best.pth`
 
-训练会保存：
+### 3. 原始三层 CNN
 
-- `exp_result/checkpoints/emotion_best.pth`：验证集效果最好的模型
-- `exp_result/checkpoints/emotion_last.pth`：最后一个 Epoch 的模型
-- `exp_result/checkpoints/training_history.json`：每轮训练/验证指标和配置
+原始模型保留用于学习对照，新版加载器可以直接读取：
 
-### HOG + SVM 基线
+- 输入：48×48
+- FER2013 测试准确率：37.24%
+- 检查点：`code/emotion_best.pth`
 
-`HOGSVM.py` 保留传统方法对照：
+### 4. HOG + SVM
 
 - 输入：48×48 灰度图
 - HOG：窗口 48×48，Cell 16×16，Block 8×8，9 个 bin
-- 分类器：RBF 核 SVM
-- 参数：`C=10`、`gamma='scale'`、`class_weight='balanced'`
-- 输出：SVM 模型、JSON 指标、Accuracy/F1 文本结果
-
-## 实验结果
-
-> 下表会在正式训练和完整评估结束后更新。
-
-| 方法 / 数据集 | Accuracy | Weighted F1-score |
-|---|---:|---:|
-| HOG + SVM / FER2013 test | 34.38% | 0.2881 |
-| MobileNetV3-Small / FER2013 test | 待训练完成后更新 | 待训练完成后更新 |
-| MobileNetV3-Small / CK+ 跨数据集测试 | 待训练完成后更新 | 待训练完成后更新 |
+- 分类器：RBF SVM，`C=10`，`class_weight='balanced'`
+- FER2013 测试准确率：34.38%
 
 ## 项目结构
 
 ```text
 emotion_exp/
 ├── code/
-│   ├── config.py          # 路径、类别和默认配置
-│   ├── data.py            # 数据集、增强和类别平衡
-│   ├── model.py           # 模型工厂、检查点、Grad-CAM 目标层
-│   ├── train.py           # 迁移学习训练入口
-│   ├── judge.py           # FER2013/CK+ 评估与混淆矩阵
-│   ├── compare.py         # 传统方法与 CNN 指标对比
-│   ├── HOGSVM.py          # HOG + SVM 基线
-│   ├── visualize.py       # Grad-CAM 和卷积特征图
-│   ├── face_detector.py   # YuNet/MTCNN/Haar 检测封装
-│   ├── real_time.py       # 摄像头、视频和图片推理
-│   └── mtcnn_align.py     # 数据集人脸对齐
+│   ├── config.py                 # 路径、类别和默认配置
+│   ├── data.py                   # 数据集、增强与采样
+│   ├── model.py                  # 模型工厂、检查点与旧模型兼容
+│   ├── train.py                  # 训练、续训、MixUp、调度
+│   ├── judge.py                  # PyTorch 模型评估
+│   ├── evaluate_pretrained.py    # OpenCV Zoo 模型评估
+│   ├── compare.py                # 三种方法指标对比
+│   ├── HOGSVM.py                 # HOG + SVM 基线
+│   ├── visualize.py              # Grad-CAM 与特征图
+│   ├── face_detector.py          # YuNet/MTCNN/Haar 检测封装
+│   ├── pretrained_fer.py         # OpenCV Zoo FER 模型封装与对齐
+│   ├── real_time.py              # 双后端实时推理
+│   └── mtcnn_align.py            # 数据集人脸对齐
 ├── models/
 │   ├── README.md
-│   └── face_detection_yunet_2023mar.onnx
-├── dataset/               # 本地数据集，不上传
-├── exp_result/            # 指标、可视化与本地模型
-├── paper/                 # 课程资料
-└── venv/                  # 本地环境，不上传
+│   ├── face_detection_yunet_2023mar.onnx
+│   └── facial_expression_recognition_mobilefacenet_2022july.onnx
+├── dataset/                      # 本地数据集，不上传
+├── exp_result/                   # 指标、混淆矩阵、本地模型
+└── paper/                        # 课程资料
 ```
 
-## 快速开始
+## 安装依赖
 
-### 1. 安装依赖
-
-推荐使用 Python 3.10：
+推荐 Python 3.10：
 
 ```powershell
 python -m venv venv
@@ -163,13 +163,7 @@ python -m venv venv
 pip install -r code\requirements.txt
 ```
 
-如果使用已有的 Conda 环境，也可以直接安装：
-
-```powershell
-pip install -r code\requirements.txt
-```
-
-### 2. 准备数据
+## 数据目录
 
 ```text
 dataset/
@@ -187,27 +181,52 @@ dataset/
     └── surprise/
 ```
 
-如果只有原始 FER2013，可先执行：
+原始 FER2013 可以使用：
 
 ```powershell
-python code\mtcnn_align.py --input dataset\FER2013 --output dataset\FER2013_aligned
+python code\mtcnn_align.py `
+  --input dataset\FER2013 `
+  --output dataset\FER2013_aligned
 ```
 
-### 3. 训练
+## 训练自模型
+
+ResNet18 迁移学习示例：
 
 ```powershell
 python code\train.py `
-  --arch mobilenet_v3_small `
+  --arch resnet18 `
   --image-size 96 `
   --batch-size 128 `
-  --epochs 25 `
-  --freeze-epochs 1 `
+  --epochs 18 `
+  --freeze-epochs 4 `
+  --lr 1e-3 `
+  --backbone-lr 1e-4 `
   --output-dir exp_result\checkpoints
 ```
 
-第一次运行会下载约 10 MB 的 ImageNet 预训练权重。也可以使用 `--no-pretrained` 进行从零训练对照。
+断点续训：
 
-### 4. 评估
+```powershell
+python code\train.py `
+  --resume exp_result\checkpoints\emotion_last.pth `
+  --epochs 30 `
+  --arch resnet18 `
+  --image-size 96
+```
+
+其他可选架构：
+
+```text
+mobilenet_v3_small
+resnet18
+fer_cnn
+simple_cnn
+```
+
+## 评估
+
+评估自训练 PyTorch 模型：
 
 ```powershell
 python code\judge.py `
@@ -216,20 +235,30 @@ python code\judge.py `
   --output-dir exp_result
 ```
 
-会生成：
+评估 OpenCV Zoo 预训练模型：
 
-- `exp_result/metrics.json`
-- `exp_result/confusion_matrix_fer2013.png`
-- `exp_result/confusion_matrix_ckplus.png`
+```powershell
+python code\evaluate_pretrained.py `
+  --dataset both `
+  --output-dir exp_result
+```
 
-### 5. 方法对比
+生成方法对比：
 
 ```powershell
 python code\HOGSVM.py
 python code\compare.py
 ```
 
-### 6. Grad-CAM 可视化
+会生成：
+
+- `exp_result/metrics.json`
+- `exp_result/metrics_opencv.json`
+- `exp_result/comparison.json`
+- `exp_result/confusion_matrix_fer2013*.png`
+- `exp_result/confusion_matrix_ckplus*.png`
+
+## Grad-CAM
 
 ```powershell
 python code\visualize.py `
@@ -238,32 +267,42 @@ python code\visualize.py `
   --feature-maps
 ```
 
-### 7. 实时识别
+## 实时识别
 
-摄像头：
+默认使用 OpenCV Zoo 预训练模型，无需指定自训练检查点：
 
 ```powershell
 python code\real_time.py `
+  --backend opencv `
+  --source 0 `
+  --detector yunet
+```
+
+使用自训练 PyTorch 模型：
+
+```powershell
+python code\real_time.py `
+  --backend torch `
   --checkpoint exp_result\checkpoints\emotion_best.pth `
   --source 0 `
   --detector yunet
 ```
 
-图片：
+图片输入：
 
 ```powershell
 python code\real_time.py `
-  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --backend opencv `
   --source path\to\image.jpg `
   --output exp_result\result.jpg `
   --no-display
 ```
 
-视频：
+视频输入：
 
 ```powershell
 python code\real_time.py `
-  --checkpoint exp_result\checkpoints\emotion_best.pth `
+  --backend opencv `
   --source path\to\video.mp4 `
   --output exp_result\result.mp4 `
   --no-display
@@ -271,61 +310,42 @@ python code\real_time.py `
 
 按 `q` 或 `Esc` 退出摄像头/视频窗口。
 
-## 结果文件说明
-
-`exp_result/metrics.json` 包含：
-
-- 数据集样本数量
-- Accuracy
-- Weighted F1
-- Macro F1
-- Macro Precision / Recall
-- 每个类别的 Precision / Recall / F1
-- 完整混淆矩阵
-
-`exp_result/hog_svm_results.json` 包含传统基线指标。`compare.py` 会读取两种方法的指标并生成 `comparison.json`。
-
 ## 学习总结
 
-这个项目记录的不仅仅是一次模型训练，而是围绕同一个任务不断定位问题、重构和验证的过程：
-
-1. 认识到简单 CNN 从零训练不一定适合小数据集，迁移学习通常更有效。
-2. 学会处理类别不平衡，而不是只看整体准确率。
-3. 学会使用验证集、早停、学习率调度和检查点管理控制训练过程。
-4. 学会把训练、评估、可视化和部署拆分为可复用模块。
-5. 理解跨数据集测试中的领域偏移问题。
-6. 理解模型准确率之外，实时系统的检测速度、稳定性和输入容错同样重要。
-7. 通过 Grad-CAM 观察模型是否真正关注眼睛、眉毛、嘴巴等表情相关区域。
+1. 通过原始模型复现确认了数据、标签和评估流程的可靠性。
+2. 发现并修复了 MobileNet 分类头维度错误，避免无效实验继续消耗时间。
+3. 对比了 HOG + SVM、简单 CNN、FER-CNN、MobileNetV3 和 ResNet18，理解了不同模型的适用条件。
+4. 理解了类别不平衡、数据增强、MixUp、学习率调度和早停对训练的影响。
+5. 认识到 FER2013 本身具有低分辨率、标签噪声和类别模糊问题，单靠更换模型不一定能持续提升。
+6. 通过使用更匹配人脸任务的预训练模型，把 FER2013 测试准确率从 37.24% 提升到 45.25%。
+7. 完成了从训练、评估、Grad-CAM 到摄像头/视频/图片部署的完整闭环。
 
 ## 当前局限
 
-- FER2013 本身存在低分辨率、标注噪声和类别模糊问题。
-- CK+ 与 FER2013 的标签体系不同，跨数据集指标只能作为参考。
-- CPU 训练速度有限，尚未进行大规模超参数搜索。
-- 实时系统使用单帧检测和简单中心位置平滑，没有实现完整的人脸跟踪。
-- YuNet 对极端侧脸、遮挡和光线不足场景仍可能失效。
-- 模型只输出离散表情类别，未处理混合表情和强度回归。
+- FER2013 测试准确率仍受数据集噪声与领域差异限制。
+- 自训练 ResNet18 在 FER2013 上仍存在明显过拟合。
+- CK+ 标签映射为近似映射，跨数据集指标不能作为严格基准。
+- OpenCV Zoo 模型主要针对 RAF-DB，迁移到 FER2013 后指标会下降。
+- CPU 训练速度有限，没有进行大规模超参数搜索。
+- 实时系统使用简单位置平滑，尚未加入完整的人脸跟踪。
 
 ## 后续计划
 
-- 在 GPU 环境下进行完整超参数搜索和交叉验证。
-- 尝试 EfficientNet-B0、ConvNeXt-Tiny 等更强的主干网络。
-- 引入 Focal Loss、MixUp、CutMix 和更强的人脸专用增强。
-- 使用 DeepFace、RetinaFace 或 YOLO-Face 改善复杂场景下的人脸检测。
-- 引入 ByteTrack 等轻量跟踪算法，为每个人脸维护稳定的时序状态。
-- 增加 Web 或桌面界面，并支持摄像头选择、阈值和模型切换。
-- 通过 ONNX Runtime 或 OpenVINO 优化 CPU 推理速度。
+- 增加数据质量检查和标签清洗工具。
+- 尝试 RAF-DB 等其他表情数据集的训练或微调。
+- 在 GPU 环境进行完整超参数搜索。
+- 对预训练模型进行 FER2013 微调，缩小领域差异。
+- 加入 ONNX Runtime 或 OpenVINO 推理优化。
+- 使用 ByteTrack 等轻量跟踪算法提升多人场景稳定性。
+- 增加 Web 或桌面界面。
 
-## 参考资料与模型许可
+## 模型来源与许可
 
+- [OpenCV Zoo Face Detection YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)，Apache-2.0
+- [OpenCV Zoo Facial Expression Recognition](https://github.com/opencv/opencv_zoo/tree/main/models/facial_expression_recognition)，Apache-2.0
 - [FER2013 Dataset](https://www.kaggle.com/datasets/msambare/fer2013)
 - [CK+ Dataset Resources](http://www.jeffcohn.net/Resources/)
-- [MobileNetV3](https://arxiv.org/abs/1905.02244)
-- [YuNet Face Detection Model](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
-- [MTCNN Python Implementation](https://github.com/ipazc/mtcnn)
-
-仓库中的 YuNet ONNX 模型来自 OpenCV Zoo，使用 Apache-2.0 许可证；具体说明见 `models/README.md`。
 
 ---
 
-本仓库会持续记录训练结果、问题定位和功能完善过程。
+本仓库用于记录人脸表情识别项目的学习、实验、问题定位和功能完善过程。

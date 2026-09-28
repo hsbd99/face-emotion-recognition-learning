@@ -95,11 +95,38 @@ class FaceDetector:
                 raise RuntimeError(f"Could not load OpenCV face cascade: {cascade_path}")
 
     def detect(self, frame: np.ndarray) -> list[FaceDetection]:
+        height, width = frame.shape[:2]
+        longest = max(height, width)
+        scale = min(4.0, 320.0 / longest) if longest < 320 else 1.0
+        working = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC) if scale > 1.0 else frame
+
         if self.backend == "yunet" and self.yunet is not None:
-            return self._detect_yunet(frame)
-        if self.backend == "mtcnn" and self.mtcnn is not None:
-            return self._detect_mtcnn(frame)
-        return self._detect_haar(frame)
+            detections = self._detect_yunet(working)
+        elif self.backend == "mtcnn" and self.mtcnn is not None:
+            detections = self._detect_mtcnn(working)
+        else:
+            detections = self._detect_haar(working)
+
+        if scale == 1.0:
+            return detections
+        return [self._scale_detection(detection, 1.0 / scale) for detection in detections]
+
+    @staticmethod
+    def _scale_detection(detection: FaceDetection, scale: float) -> FaceDetection:
+        keypoints = None
+        if detection.keypoints:
+            keypoints = {
+                name: (int(point[0] * scale), int(point[1] * scale))
+                for name, point in detection.keypoints.items()
+            }
+        return FaceDetection(
+            int(detection.x1 * scale),
+            int(detection.y1 * scale),
+            int(detection.x2 * scale),
+            int(detection.y2 * scale),
+            detection.confidence,
+            keypoints,
+        )
 
     def _detect_yunet(self, frame: np.ndarray) -> list[FaceDetection]:
         height, width = frame.shape[:2]
@@ -182,3 +209,4 @@ class FaceDetector:
 
 
 __all__ = ["FaceDetection", "FaceDetector", "YUNET_MODEL_PATH"]
+
